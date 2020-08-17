@@ -4,8 +4,6 @@ import pandas as pd
 import logging
 
 def calculate_posterior_mc_rate(mc_da, cov_da, normalize_per_cell=True, clip_norm_value=10):
-    # TODO calculate cell_a, cell_b separately
-    # so we can do post_rate only in a very small set of gene to prevent memory issue
     raw_rate = mc_da / cov_da
     cell_rate_mean = np.nanmean(raw_rate, axis=1)[:, None]  # this skip na
     cell_rate_var = np.nanvar(raw_rate, axis=1)[:, None]  # this skip na
@@ -101,95 +99,6 @@ def highly_variable_methylation_feature(X, feature_mean_cov, var_names, min_disp
 
 class Scrublet():
     def __init__(self, mc, tc, bins, sim_doublet_ratio=2.0, n_neighbors=None, expected_doublet_rate=0.1, stdev_doublet_rate=0.02):
-        ''' Initialize Scrublet object with counts matrix and doublet prediction parameters
-
-        Parameters
-        ----------
-        counts_matrix : scipy sparse matrix or ndarray, shape (n_cells, n_genes)
-            Matrix containing raw (unnormalized) UMI-based transcript counts. 
-            Converted into a scipy.sparse.csc_matrix.
-
-        total_counts : ndarray, shape (n_cells,), optional (default: None)
-            Array of total UMI counts per cell. If `None`, this is calculated
-            as the row sums of `counts_matrix`. 
-
-        sim_doublet_ratio : float, optional (default: 2.0)
-            Number of doublets to simulate relative to the number of observed 
-            transcriptomes.
-
-        n_neighbors : int, optional (default: None)
-            Number of neighbors used to construct the KNN graph of observed
-            transcriptomes and simulated doublets. If `None`, this is 
-            set to round(0.5 * sqrt(n_cells))
-
-        expected_doublet_rate : float, optional (default: 0.1)
-            The estimated doublet rate for the experiment.
-
-        stdev_doublet_rate : float, optional (default: 0.02)
-            Uncertainty in the expected doublet rate.
-
-        Attributes
-        ----------
-        predicted_doublets_ : ndarray, shape (n_cells,)
-            Boolean mask of predicted doublets in the observed
-            transcriptomes. 
-
-        doublet_scores_obs_ : ndarray, shape (n_cells,)
-            Doublet scores for observed transcriptomes.
-
-        doublet_scores_sim_ : ndarray, shape (n_doublets,)
-            Doublet scores for simulated doublets. 
-
-        doublet_errors_obs_ : ndarray, shape (n_cells,)
-            Standard error in the doublet scores for observed
-            transcriptomes.
-
-        doublet_errors_sim_ : ndarray, shape (n_doublets,)
-            Standard error in the doublet scores for simulated
-            doublets.
-
-        threshold_: float
-            Doublet score threshold for calling a transcriptome
-            a doublet.
-
-        z_scores_ : ndarray, shape (n_cells,)
-            Z-score conveying confidence in doublet calls. 
-            Z = `(doublet_score_obs_ - threhsold_) / doublet_errors_obs_`
-
-        detected_doublet_rate_: float
-            Fraction of observed transcriptomes that have been called
-            doublets.
-
-        detectable_doublet_fraction_: float
-            Estimated fraction of doublets that are detectable, i.e.,
-            fraction of simulated doublets with doublet scores above
-            `threshold_`
-
-        overall_doublet_rate_: float
-            Estimated overall doublet rate,
-            `detected_doublet_rate_ / detectable_doublet_fraction_`.
-            Should agree (roughly) with `expected_doublet_rate`.
-
-        manifold_obs_: ndarray, shape (n_cells, n_features)
-            The single-cell "manifold" coordinates (e.g., PCA coordinates) 
-            for observed transcriptomes. Nearest neighbors are found using
-            the union of `manifold_obs_` and `manifold_sim_` (see below).
-
-        manifold_sim_: ndarray, shape (n_doublets, n_features)
-            The single-cell "manifold" coordinates (e.g., PCA coordinates) 
-            for simulated doublets. Nearest neighbors are found using
-            the union of `manifold_obs_` (see above) and `manifold_sim_`.
-        
-        doublet_parents_ : ndarray, shape (n_doublets, 2)
-            Indices of the observed transcriptomes used to generate the 
-            simulated doublets.
-
-        doublet_neighbor_parents_ : list, length n_cells
-            A list of arrays of the indices of the doublet neighbors of 
-            each observed transcriptome (the ith entry is an array of 
-            the doublet neighbors of transcriptome i).
-        '''
-
         # initialize counts matrices
         self._M_obs = mc
         self._T_obs = tc
@@ -210,81 +119,6 @@ class Scrublet():
     ######## Core Scrublet functions ########
 
     def scrub_doublets(self, synthetic_doublet_umi_subsampling=1.0, use_approx_neighbors=True, distance_metric='euclidean', get_doublet_neighbor_parents=False, min_counts=3, min_cells=3, min_gene_variability_pctl=85, log_transform=False, mean_center=True, normalize_variance=True, n_prin_comps=30, verbose=True):
-        ''' Standard pipeline for preprocessing, doublet simulation, and doublet prediction
-
-        Automatically sets a threshold for calling doublets, but it's best to check 
-        this by running plot_histogram() afterwards and adjusting threshold 
-        with call_doublets(threshold=new_threshold) if necessary.
-
-        Arguments
-        ---------
-        synthetic_doublet_umi_subsampling : float, optional (defuault: 1.0) 
-            Rate for sampling UMIs when creating synthetic doublets. If 1.0, 
-            each doublet is created by simply adding the UMIs from two randomly 
-            sampled observed transcriptomes. For values less than 1, the 
-            UMI counts are added and then randomly sampled at the specified
-            rate.
-
-        use_approx_neighbors : bool, optional (default: True)
-            Use approximate nearest neighbor method (annoy) for the KNN 
-            classifier.
-
-        distance_metric : str, optional (default: 'euclidean')
-            Distance metric used when finding nearest neighbors. For list of
-            valid values, see the documentation for annoy (if `use_approx_neighbors`
-            is True) or sklearn.neighbors.NearestNeighbors (if `use_approx_neighbors`
-            is False).
-            
-        get_doublet_neighbor_parents : bool, optional (default: False)
-            If True, return the parent transcriptomes that generated the 
-            doublet neighbors of each observed transcriptome. This information can 
-            be used to infer the cell states that generated a given 
-            doublet state.
-
-        min_counts : float, optional (default: 3)
-            Used for gene filtering prior to PCA. Genes expressed at fewer than 
-            `min_counts` in fewer than `min_cells` (see below) are excluded.
-
-        min_cells : int, optional (default: 3)
-            Used for gene filtering prior to PCA. Genes expressed at fewer than 
-            `min_counts` (see above) in fewer than `min_cells` are excluded.
-
-        min_gene_variability_pctl : float, optional (default: 85.0)
-            Used for gene filtering prior to PCA. Keep the most highly variable genes
-            (in the top min_gene_variability_pctl percentile), as measured by 
-            the v-statistic [Klein et al., Cell 2015].
-
-        log_transform : bool, optional (default: False)
-            If True, log-transform the counts matrix (log10(1+TPM)). 
-            `sklearn.decomposition.TruncatedSVD` will be used for dimensionality
-            reduction, unless `mean_center` is True.
-
-        mean_center : bool, optional (default: True)
-            If True, center the data such that each gene has a mean of 0.
-            `sklearn.decomposition.PCA` will be used for dimensionality
-            reduction.
-
-        normalize_variance : bool, optional (default: True)
-            If True, normalize the data such that each gene has a variance of 1.
-            `sklearn.decomposition.TruncatedSVD` will be used for dimensionality
-            reduction, unless `mean_center` is True.
-
-        n_prin_comps : int, optional (default: 30)
-            Number of principal components used to embed the transcriptomes prior
-            to k-nearest-neighbor graph construction.
-
-        verbose : bool, optional (default: True)
-            If True, print progress updates.
-
-        Sets
-        ----
-        doublet_scores_obs_, doublet_errors_obs_,
-        doublet_scores_sim_, doublet_errors_sim_,
-        predicted_doublets_, z_scores_ 
-        threshold_, detected_doublet_rate_,
-        detectable_doublet_fraction_, overall_doublet_rate_,
-        doublet_parents_, doublet_neighbor_parents_ 
-        '''
         t0 = time.time()
 
         print_optional('Simulating doublets...', verbose)
@@ -302,26 +136,6 @@ class Scrublet():
         return self.doublet_scores_obs_, self.predicted_doublets_, self.doublet_scores_sim_
 
     def simulate_doublets(self, sim_doublet_ratio=None, synthetic_doublet_umi_subsampling=1.0):
-        ''' Simulate doublets by adding the counts of random observed transcriptome pairs.
-
-        Arguments
-        ---------
-        sim_doublet_ratio : float, optional (default: None)
-            Number of doublets to simulate relative to the number of observed 
-            transcriptomes. If `None`, self.sim_doublet_ratio is used.
-
-        synthetic_doublet_umi_subsampling : float, optional (defuault: 1.0) 
-            Rate for sampling UMIs when creating synthetic doublets. If 1.0, 
-            each doublet is created by simply adding the UMIs from two randomly 
-            sampled observed transcriptomes. For values less than 1, the 
-            UMI counts are added and then randomly sampled at the specified
-            rate.
-
-        Sets
-        ----
-        doublet_parents_
-        '''
-
         if sim_doublet_ratio is None:
             sim_doublet_ratio = self.sim_doublet_ratio
         else:
@@ -349,36 +163,6 @@ class Scrublet():
         return
 
     def calculate_doublet_scores(self, use_approx_neighbors=True, distance_metric='euclidean', get_doublet_neighbor_parents=False):
-        ''' Calculate doublet scores for observed transcriptomes and simulated doublets
-
-        Requires that manifold_obs_ and manifold_sim_ have already been set.
-
-        Arguments
-        ---------
-        use_approx_neighbors : bool, optional (default: True)
-            Use approximate nearest neighbor method (annoy) for the KNN 
-            classifier.
-
-        distance_metric : str, optional (default: 'euclidean')
-            Distance metric used when finding nearest neighbors. For list of
-            valid values, see the documentation for annoy (if `use_approx_neighbors`
-            is True) or sklearn.neighbors.NearestNeighbors (if `use_approx_neighbors`
-            is False).
-            
-        get_doublet_neighbor_parents : bool, optional (default: False)
-            If True, return the parent transcriptomes that generated the 
-            doublet neighbors of each observed transcriptome. This information can 
-            be used to infer the cell states that generated a given 
-            doublet state.
-
-        Sets
-        ----
-        doublet_scores_obs_, doublet_scores_sim_, 
-        doublet_errors_obs_, doublet_errors_sim_, 
-        doublet_neighbor_parents_
-
-        '''
-
         self._nearest_neighbor_classifier(
             k=self.n_neighbors,
             exp_doub_rate=self.expected_doublet_rate,
@@ -445,28 +229,6 @@ class Scrublet():
         return
     
     def call_doublets(self, threshold=None, verbose=True):
-        ''' Call trancriptomes as doublets or singlets
-
-        Arguments
-        ---------
-        threshold : float, optional (default: None) 
-            Doublet score threshold for calling a transcriptome
-            a doublet. If `None`, this is set automatically by looking
-            for the minimum between the two modes of the `doublet_scores_sim_`
-            histogram. It is best practice to check the threshold visually
-            using the `doublet_scores_sim_` histogram and/or based on 
-            co-localization of predicted doublets in a 2-D embedding.
-
-        verbose : bool, optional (default: True)
-            If True, print summary statistics.
-
-        Sets
-        ----
-        predicted_doublets_, z_scores_, threshold_,
-        detected_doublet_rate_, detectable_doublet_fraction, 
-        overall_doublet_rate_
-        '''
-
         if threshold is None:
             # automatic threshold detection
             # http://scikit-image.org/docs/dev/api/skimage.filters.html
