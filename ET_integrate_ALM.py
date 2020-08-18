@@ -1,6 +1,6 @@
 y = np.loadtxt(indir + 'cell_4541_integrated_cell_4176_L5ET_cell_365_Tasic_hvg10k_Scanoroma_integrated_sigma100_p50_y.txt')
-metarna = pd.read_csv('/gale/netapp/home/zhoujt/project/CEMBA/Tasic2018/GSE115746_complete_metadata_28706-cells.csv', header = 0)
-expr = pd.read_csv('/gale/netapp/home/zhoujt/project/CEMBA/Tasic2018/GSE115746_cells_exon_counts.csv', header = 0, index_col = 0)
+metarna = pd.read_csv(indir + 'Tasic2018/GSE115746_complete_metadata_28706-cells.csv', header = 0)
+expr = pd.read_csv(indir + 'Tasic2018/GSE115746_cells_exon_counts.csv', header = 0, index_col = 0)
 
 marker = ['L5 PT ALM Npsr1','L5 PT ALM Slco2a1','L5 PT ALM Hpgd']
 metarna = metarna[(metarna['cell_cluster']=='L5 PT ALM Npsr1')| (metarna['cell_cluster']=='L5 PT ALM Slco2a1') | (metarna['cell_cluster']=='L5 PT ALM Hpgd')]
