@@ -10,7 +10,7 @@ cellname = metarna['sample_name'].to_numpy()
 expr = expr.to_numpy().T
 metarna = metarna.to_numpy()[:,1:]
 
-f = h5py.File('/gale/netapp/home/zhoujt/project/CEMBA/Tasic2018/L5-PT_ALM.h5py', 'w')
+f = h5py.File(indir + 'Tasic2018/L5-PT_ALM.h5py', 'w')
 tmp = f.create_dataset('genes', genename.shape, dtype=h5py.string_dtype(encoding='utf-8'), compression='gzip')
 tmp[()] = genename
 tmp = f.create_dataset('meta', metarna.shape, dtype=h5py.string_dtype(encoding='utf-8'), compression='gzip')
