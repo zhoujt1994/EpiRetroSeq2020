@@ -37,7 +37,6 @@ nc = 15
 label = np.load(f'cell_4176_L5PT_{nc}cluster_label.npy')
 read_gene = np.load('cell_4176_L5PT_read_gene.mCH.npy')
 rate_gene = np.load('cell_4176_L5PT_rate_gene.mCH.npy')
-motif_idx = np.load('DMR_center_slop200/426_motif_gene_name.npy')
 
 gene_all = np.loadtxt('gencode.vM10.bed', dtype=np.str)
 geneidx = {x:i for i,x in enumerate(gene_all[:,-1])}
@@ -53,11 +52,10 @@ clusterreadg = np.array([np.sum(read_gene[label==i], axis = 0) for i in range(nc
 covfilter = (np.sum((clusterreadg>100), axis = 0)==len(clusterrateg))
 rateg = clusterrateg[:, covfilter]
 gene = gene[covfilter]
+genefilter = np.where(chrfilter)[0][covfilter]
 
 minmaxclusterrateg = np.array([(rateg[i] - min(rateg[i])) / (max(rateg[i]) - min(rateg[i])) for i in range(nc)])
 nodeweight = 1 - minmaxclusterrateg
-
-tflist = motif_idx[np.array([x in gene[:,-1] for x in motif_idx])]
 
 motif_map = np.array([np.load('motif_gene_name.npy'), np.loadtxt('filename_to_motifname.txt', dtype=np.str)[:,0]]).T
 motif_map = np.array([x for x in motif_map if x[0] in gene[:,-1]])
@@ -68,7 +66,7 @@ for x,y in motif_map:
     if motif_dmr[x]==[]:
         motif_dmr[x] = set(np.loadtxt(f'DMR_CG_comb/assign_motif/DMR_all_hypo.slop100.{y}.txt', dtype=np.int))
     else:
-        motif_dmr[x] = motif_dmr[x].union(np.loadtxt(f, dtype=np.int))
+        motif_dmr[x] = motif_dmr[x].union(np.loadtxt(f'DMR_CG_comb/assign_motif/DMR_all_hypo.slop100.{y}.txt', dtype=np.int))
     tot += 1
     print(tot, x, len(motif_dmr[x]))
 
@@ -82,8 +80,6 @@ for line in fin:
 fin.close()
 dmrgene = np.array(dmrgene)
 motif = np.sort(list(motif_dmr.keys()))
-
-genefilter = [geneidx[x] for x in gene[:,-1]]
 
 prscore = []
 isonodefilter = []
